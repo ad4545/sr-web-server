@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+
+// Message representing a PGM image.
+message PGMImage {
+  // Image width in pixels.
+  int32 width = 1;
+  
+  // Image height in pixels.
+  int32 height = 2;
+  
+  // Image resolution (for example, dots per inch).
+  double resolution = 3;
+  
+  // Array of pixel values (each between 0 and max gray value, typically 0-255).
+  bytes pixels = 4;
+}

@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  node-server:
+    image: sr-web-server:latest
+    ports:
+      - "3001:3001"
+    extra_hosts:
+      - "host.docker.internal:10.0.0.7"
+    environment:
+      - MONGO_URI=mongodb://host.docker.internal:27017/sevenhub
+      - REDIS_HOST=10.0.0.13       # ✅ add your Redis IP here
+      - REDIS_PORT=6379                   # ✅ add Redis port
+      - KAFKA_BROKER=10.0.0.12:9092      # ✅ add Kafka broker
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: overlay
+    attachable: true
