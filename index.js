@@ -29,6 +29,7 @@ try {
 let odomType;
 let feedbackType;
 let twistType;
+let batteryType;
 let rabbitConnection;
 let rabbitChannel;
 let rabbitReconnectTimer;
@@ -98,6 +99,11 @@ async function loadFeedbackProto() {
 async function loadTwistProto() {
   const root = await protobuf.load(path.join(__dirname, "protobufs", "Twist.proto"));
   twistType = root.lookupType("Twist");
+}
+
+async function loadBatteryProto() {
+  const root = await protobuf.load(path.join(__dirname, "protobufs", "Battery.proto"));
+  batteryType = root.lookupType("Battery");
 }
 
 function safeAck(ack, payload) {
@@ -312,6 +318,9 @@ async function connectKafka() {
 
     // Initialize Feedback Consumer for WebSockets
     await startFeedbackConsumer();
+
+    // Initialize Battery Consumer for WebSockets
+    await startBatteryConsumer();
   } catch (err) {
     isKafkaConnected = false;
     console.error('❌ Kafka connection failed:', err.message);
@@ -372,6 +381,7 @@ async function startOdomConsumer() {
 
 // ── Feedback Consumer ──────────────────────────────────────────────────────
 const feedbackConsumer = kafka.consumer({ groupId: 'feedback-socket-group' });
+const batteryConsumer = kafka.consumer({ groupId: 'battery-socket-group' });
 
 async function startFeedbackConsumer() {
   try {
@@ -406,6 +416,38 @@ async function startFeedbackConsumer() {
     console.log("✅ Kafka Feedback Consumer started");
   } catch (err) {
     console.error("❌ Kafka Feedback Consumer failed:", err.message);
+  }
+}
+
+// ── Battery Consumer ───────────────────────────────────────────────────────
+async function startBatteryConsumer() {
+  try {
+    await loadBatteryProto();
+
+    await batteryConsumer.connect();
+    await batteryConsumer.subscribe({
+      topic: "amr.001.uavcanRosBridge.uavcan_ros_bridge.Battery",
+      fromBeginning: false,
+    });
+
+    await batteryConsumer.run({
+      eachMessage: async ({ message }) => {
+        try {
+          if (!message.value) return;
+
+          const decoded = batteryType.decode(message.value);
+          const payload = batteryType.toObject(decoded, PROTOBUF_TO_OBJECT_OPTIONS);
+
+          io?.emit("battery", payload);
+        } catch (err) {
+          console.error("❌ Error decoding/emitting battery message:", err.message);
+        }
+      },
+    });
+
+    console.log("✅ Kafka Battery Consumer started");
+  } catch (err) {
+    console.error("❌ Kafka Battery Consumer failed:", err.message);
   }
 }
 
@@ -518,44 +560,6 @@ app.post("/save-task", async (req, res) => {
     const { masterTaskName, tasks, topic } = req.body; // ✅ directly from req.body
     console.log("task data :", masterTaskName, tasks, topic)
 
-    // if (!masterTaskName || typeof masterTaskName !== 'string') {
-    //   return res.status(400).json({ error: 'masterTaskName is required and must be a string.' });
-    // }
-
-    // if (!Array.isArray(tasks) || tasks.length === 0) {
-    //   return res.status(400).json({ error: 'tasks is required and must be a non-empty array.' });
-    // }
-
-    // // Validate each task
-    // for (const task of tasks) {
-    //   if (!task.taskName || typeof task.taskName !== 'string') {
-    //     return res.status(400).json({ error: 'Each task must have a valid taskName.' });
-    //   }
-
-    //   if (!task.type || typeof task.type !== 'string') {
-    //     return res.status(400).json({ error: 'Each task must have a valid type.' });
-    //   }
-
-    //   // Validate path if present
-    //   if (task.path && Object.keys(task.path).length > 0) {
-    //     const { pathName, paths } = task.path;
-
-    //     if (!pathName || typeof pathName !== 'string') {
-    //       return res.status(400).json({ error: 'path.pathName is required and must be a string.' });
-    //     }
-
-    //     if (!Array.isArray(paths) || paths.length === 0) {
-    //       return res.status(400).json({ error: 'path.paths is required and must be a non-empty array.' });
-    //     }
-
-    //     for (const point of paths) {
-    //       if (!point.translation || !point.rotation) {
-    //         return res.status(400).json({ error: 'Each path point must have translation and rotation.' });
-    //       }
-    //     }
-    //   }
-    // }
-
     const result = await db.collection(TASK_COLLECTION).insertOne({
       masterTaskName,
       tasks,
@@ -622,18 +626,6 @@ app.post("/send-task", async (req, res) => {
   console.log('send task called', req.body.task.topic)
   try {
     const { masterTaskName, tasks, topic } = req.body.task; // ✅ unwrap from req.body.task
-
-    // if (!masterTaskName || typeof masterTaskName !== 'string') {
-    //   return res.status(400).json({ error: 'masterTaskName is required and must be a string.' });
-    // }
-
-    // if (!Array.isArray(tasks) || tasks.length === 0) {
-    //   return res.status(400).json({ error: 'tasks is required and must be a non-empty array.' });
-    // }
-
-    // if (!topic || typeof topic !== 'string') {
-    //   return res.status(400).json({ error: 'topic is required and must be a string.' });
-    // }
 
     // Publish to Kafka
     await producer.send({

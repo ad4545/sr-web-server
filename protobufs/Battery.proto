@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+
+message Header
+{
+ uint32 Seq = 1;
+
+ google.protobuf.Timestamp Stamp = 2;
+
+ string FrameId = 3;
+}
+
+
+message Battery
+{
+ Header Header = 1;
+
+ bool Charging = 2;
+
+ uint32 CapacityDesigned = 3;
+
+ uint32 CapacityFull = 4;
+
+ uint32 NCells = 5;
+
+ float Volts = 6;
+
+ float Amps = 7;
+
+ float TempC = 8;
+
+ float RemainingTime = 9;
+
+ float RemainingCapacity = 10;
+
+ float SOC = 11;
+
+ float SOH = 12;
+}
