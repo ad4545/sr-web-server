@@ -7,7 +7,10 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start:api-core": "APP_ROLE=api-core node index.js",
+    "start:realtime-core": "APP_ROLE=realtime-core node index.js",
+    "start:nginx": "bash scripts/start-nginx.sh",
+    "test": "node --test"
   },
   "dependencies": {
     "amqplib": "^0.10.3",
