@@ -1,52 +1,36 @@
 const { PROTOBUF_TO_OBJECT_OPTIONS } = require("../../clients/protobuf");
+const { resolveRobotIdFromTopic } = require("../../config/grpc-utils");
+const { createGrpcTopicStream } = require("../grpc/client");
 
-function createOdomStream({ kafkaClient, kafkaConfig, odometryType, logger, emitPosition }) {
-  const consumer = kafkaClient.createConsumer(kafkaConfig.groupIds.odom);
-  let connected = false;
+function createOdomStream({
+  grpcConfig,
+  grpcTypes,
+  odometryType,
+  logger,
+  emitPosition,
+}) {
+  return createGrpcTopicStream({
+    grpcConfig,
+    logger: logger.child("grpc"),
+    label: "robot-position stream",
+    topics: grpcConfig.topics.odom,
+    topicStreamRequestType: grpcTypes.topicStreamRequestType,
+    rawDataChunkType: grpcTypes.rawDataChunkType,
+    onChunk({ topic, payload }) {
+      try {
+        const decoded = odometryType.decode(payload);
+        const position = odometryType.toObject(decoded, PROTOBUF_TO_OBJECT_OPTIONS);
+        const robotId = resolveRobotIdFromTopic(topic, grpcConfig.topicSuffixes?.odom || []);
 
-  return {
-    async start() {
-      if (!connected) {
-        await consumer.connect();
-        for (const topic of kafkaConfig.topics.odom) {
-          await consumer.subscribe({ topic, fromBeginning: false });
-        }
-        connected = true;
+        emitPosition({
+          robotId,
+          ...position,
+        });
+      } catch (error) {
+        logger.error("robot-position stream processing failed", error.message);
       }
-
-      await consumer.run({
-        eachMessage: async ({ topic, message }) => {
-          if (!message.value) {
-            return;
-          }
-
-          try {
-            const decoded = odometryType.decode(message.value);
-            const payload = odometryType.toObject(decoded, PROTOBUF_TO_OBJECT_OPTIONS);
-            const robotId = topic.split(".odom_with_amcl")[0];
-
-            emitPosition({
-              robotId,
-              ...payload,
-            });
-          } catch (error) {
-            logger.error("robot-position stream processing failed", error.message);
-          }
-        },
-      });
-
-      logger.info(`robot-position stream started for topics: ${kafkaConfig.topics.odom.join(", ")}`);
     },
-
-    async stop() {
-      if (!connected) {
-        return;
-      }
-
-      connected = false;
-      await consumer.disconnect();
-    },
-  };
+  });
 }
 
 module.exports = {

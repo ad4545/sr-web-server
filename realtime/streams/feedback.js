@@ -1,53 +1,24 @@
 const { PROTOBUF_TO_OBJECT_OPTIONS } = require("../../clients/protobuf");
+const { createGrpcTopicStream } = require("../grpc/client");
 
-function createTaskFeedbackStream({
-  kafkaClient,
-  kafkaConfig,
-  feedbackType,
-  logger,
-  emitTaskFeedback,
-}) {
-  const consumer = kafkaClient.createConsumer(kafkaConfig.groupIds.taskFeedback);
-  let connected = false;
-
-  return {
-    async start() {
-      if (!connected) {
-        await consumer.connect();
-        for (const topic of kafkaConfig.topics.taskFeedback) {
-          await consumer.subscribe({ topic, fromBeginning: false });
-        }
-        connected = true;
+function createTaskFeedbackStream({ grpcConfig, grpcTypes, feedbackType, logger, emitTaskFeedback }) {
+  return createGrpcTopicStream({
+    grpcConfig,
+    logger: logger.child("grpc"),
+    label: "task-feedback stream",
+    topics: grpcConfig.topics.taskFeedback,
+    topicStreamRequestType: grpcTypes.topicStreamRequestType,
+    rawDataChunkType: grpcTypes.rawDataChunkType,
+    onChunk({ payload }) {
+      try {
+        const decoded = feedbackType.decode(payload);
+        const taskFeedback = feedbackType.toObject(decoded, PROTOBUF_TO_OBJECT_OPTIONS);
+        emitTaskFeedback(taskFeedback);
+      } catch (error) {
+        logger.error("task-feedback stream processing failed", error.message);
       }
-
-      await consumer.run({
-        eachMessage: async ({ message }) => {
-          if (!message.value) {
-            return;
-          }
-
-          try {
-            const decoded = feedbackType.decode(message.value);
-            const payload = feedbackType.toObject(decoded, PROTOBUF_TO_OBJECT_OPTIONS);
-            emitTaskFeedback(payload);
-          } catch (error) {
-            logger.error("task-feedback stream processing failed", error.message);
-          }
-        },
-      });
-
-      logger.info(`task-feedback stream started for topics: ${kafkaConfig.topics.taskFeedback.join(", ")}`);
     },
-
-    async stop() {
-      if (!connected) {
-        return;
-      }
-
-      connected = false;
-      await consumer.disconnect();
-    },
-  };
+  });
 }
 
 module.exports = {

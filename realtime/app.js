@@ -17,8 +17,11 @@ function createRealtimeApp({ readinessState }) {
       status: state.ready ? "ready" : "starting",
       dependencies: {
         rabbitmq: state.rabbitmqReady ? "ready" : "degraded",
+        grpc: state.grpcReady ? "ready" : "degraded",
       },
       rabbitmqError: state.rabbitmqError || null,
+      grpcError: state.grpcError || null,
+      grpcConnections: state.grpcConnections || null,
     });
   });
 

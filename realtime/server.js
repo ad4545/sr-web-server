@@ -1,12 +1,12 @@
 const http = require("http");
 const { env } = require("../config/env");
 const { createLogger } = require("../lib/logger");
-const { createKafkaClient } = require("../clients/kafka");
 const { createRabbitMqClient } = require("../clients/rabbitmq");
 const {
   loadBatteryType,
   loadFeedbackType,
   loadOdometryType,
+  loadStreamRouterTypes,
   loadTwistType,
 } = require("../clients/protobuf");
 const { createTwistHandler } = require("./handlers/twist");
@@ -18,19 +18,19 @@ const { createRealtimeApp } = require("./app");
 
 async function startRealtimeCore() {
   const logger = createLogger("realtime-core");
-  const kafkaClient = createKafkaClient({
-    config: env.kafka,
-  });
+  const { grpc } = require("../config/grpc");
   const rabbitMqClient = createRabbitMqClient({
     config: env.rabbitmq,
     logger: logger.child("rabbitmq"),
   });
+  let streams = {};
 
-  const [odometryType, feedbackType, batteryType, twistType] = await Promise.all([
+  const [odometryType, feedbackType, batteryType, twistType, grpcTypes] = await Promise.all([
     loadOdometryType(),
     loadFeedbackType(),
     loadBatteryType(),
     loadTwistType(),
+    loadStreamRouterTypes(),
   ]);
 
   let ready = false;
@@ -39,6 +39,17 @@ async function startRealtimeCore() {
       ready,
       rabbitmqReady: rabbitMqClient.isReady(),
       rabbitmqError: rabbitMqClient.getLastError()?.message || null,
+      grpcReady: ready,
+      grpcError: (() => {
+        const statuses = Object.values(streams).map((stream) => stream?.getStatus?.() || null);
+        return statuses.map((status) => status?.lastError || null).find(Boolean) || null;
+      })(),
+      grpcConnections: Object.fromEntries(
+        Object.entries(streams).map(([name, stream]) => {
+          const status = stream?.getStatus?.() || {};
+          return [name, status.connectedTopics || []];
+        })
+      ),
     }),
   });
 
@@ -64,33 +75,31 @@ async function startRealtimeCore() {
     );
   });
 
-  const odomStream = createOdomStream({
-    kafkaClient,
-    kafkaConfig: env.kafka,
-    odometryType,
-    logger: logger.child("odom-stream"),
-    emitPosition: socket.emitPosition,
-  });
-  const taskFeedbackStream = createTaskFeedbackStream({
-    kafkaClient,
-    kafkaConfig: env.kafka,
-    feedbackType,
-    logger: logger.child("task-feedback-stream"),
-    emitTaskFeedback: socket.emitTaskFeedback,
-  });
-  const batteryStream = createBatteryStream({
-    kafkaClient,
-    kafkaConfig: env.kafka,
-    batteryType,
-    logger: logger.child("battery-stream"),
-    emitBattery: socket.emitBattery,
-  });
+  streams = {
+    odom: createOdomStream({
+      grpcConfig: grpc,
+      grpcTypes,
+      odometryType,
+      logger: logger.child("odom-stream"),
+      emitPosition: socket.emitPosition,
+    }),
+    taskFeedback: createTaskFeedbackStream({
+      grpcConfig: grpc,
+      grpcTypes,
+      feedbackType,
+      logger: logger.child("task-feedback-stream"),
+      emitTaskFeedback: socket.emitTaskFeedback,
+    }),
+    battery: createBatteryStream({
+      grpcConfig: grpc,
+      grpcTypes,
+      batteryType,
+      logger: logger.child("battery-stream"),
+      emitBattery: socket.emitBattery,
+    }),
+  };
 
-  await Promise.all([
-    odomStream.start(),
-    taskFeedbackStream.start(),
-    batteryStream.start(),
-  ]);
+  await Promise.all(Object.values(streams).map((stream) => stream.start()));
 
   ready = true;
 
@@ -103,9 +112,7 @@ async function startRealtimeCore() {
     ready = false;
 
     await Promise.allSettled([
-      odomStream.stop(),
-      taskFeedbackStream.stop(),
-      batteryStream.stop(),
+      ...Object.values(streams).map((stream) => stream.stop()),
       rabbitMqClient.close(),
       socket.close(),
     ]);

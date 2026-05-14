@@ -27,10 +27,20 @@ async function loadTwistType() {
   return loadType(["protobufs", "Twist.proto"], "Twist");
 }
 
+async function loadStreamRouterTypes() {
+  const root = await protobuf.load(resolveProjectPath("protobufs", "StreamRouter.proto"));
+
+  return {
+    topicStreamRequestType: root.lookupType("com.example.grpc.TopicStreamRequest"),
+    rawDataChunkType: root.lookupType("com.example.grpc.RawDataChunk"),
+  };
+}
+
 module.exports = {
   PROTOBUF_TO_OBJECT_OPTIONS,
   loadBatteryType,
   loadFeedbackType,
   loadOdometryType,
+  loadStreamRouterTypes,
   loadTwistType,
 };
