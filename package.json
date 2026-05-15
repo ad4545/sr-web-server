@@ -9,7 +9,7 @@
   "scripts": {
     "start:api-core": "APP_ROLE=api-core node index.js",
     "start:realtime-core": "APP_ROLE=realtime-core node index.js",
-    "start:grpc-client": "node grpc-client/index.js",
+    "start:grpc-client": "node realtime/server.js",
     "start:nginx": "bash scripts/start-nginx.sh",
     "test": "node --test"
   },

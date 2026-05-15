@@ -1,5 +1,6 @@
 const { parseBoolean, parseCsv, parseNumber } = require("./env");
 const { buildRobotTopics } = require("./grpc-utils");
+const { PROTOBUF_TO_OBJECT_OPTIONS } = require("./constants");
 
 function readRequiredCsv(value, envName) {
   const parsed = parseCsv(value, "");
@@ -32,6 +33,23 @@ const grpc = Object.freeze({
     odom: buildRobotTopics(robots, topicSuffixes.odom),
     taskFeedback: buildRobotTopics(robots, topicSuffixes.taskFeedback),
     battery: buildRobotTopics(robots, topicSuffixes.battery),
+  },
+  schemas: {
+    odom: Object.freeze({
+      protoPath: "protobufs/Odometry.proto",
+      typeName: "combined_odom.Odometry",
+      toObjectOptions: PROTOBUF_TO_OBJECT_OPTIONS,
+    }),
+    taskFeedback: Object.freeze({
+      protoPath: "protobufs/Feedback.proto",
+      typeName: "std_msgs.String",
+      toObjectOptions: PROTOBUF_TO_OBJECT_OPTIONS,
+    }),
+    battery: Object.freeze({
+      protoPath: "protobufs/Battery.proto",
+      typeName: "Battery",
+      toObjectOptions: PROTOBUF_TO_OBJECT_OPTIONS,
+    }),
   },
 });
 

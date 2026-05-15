@@ -3,12 +3,11 @@ const { env } = require("../config/env");
 const { createLogger } = require("../lib/logger");
 const { createRabbitMqClient } = require("../clients/rabbitmq");
 const {
-  loadBatteryType,
-  loadFeedbackType,
-  loadOdometryType,
+  loadProtobufSchema,
   loadStreamRouterTypes,
   loadTwistType,
 } = require("../clients/protobuf");
+const { createTwistService } = require("./services/twist.service");
 const { createTwistHandler } = require("./handlers/twist");
 const { createSocketServer } = require("./socket");
 const { createOdomStream } = require("./streams/odom");
@@ -25,10 +24,10 @@ async function startRealtimeCore() {
   });
   let streams = {};
 
-  const [odometryType, feedbackType, batteryType, twistType, grpcTypes] = await Promise.all([
-    loadOdometryType(),
-    loadFeedbackType(),
-    loadBatteryType(),
+  const [odomSchema, taskFeedbackSchema, batterySchema, twistType, grpcTypes] = await Promise.all([
+    loadProtobufSchema(grpc.schemas.odom),
+    loadProtobufSchema(grpc.schemas.taskFeedback),
+    loadProtobufSchema(grpc.schemas.battery),
     loadTwistType(),
     loadStreamRouterTypes(),
   ]);
@@ -60,9 +59,11 @@ async function startRealtimeCore() {
   });
 
   const twistHandler = createTwistHandler({
-    rabbitMqClient,
-    rabbitConfig: env.rabbitmq,
-    twistType,
+    service: createTwistService({
+      rabbitMqClient,
+      rabbitConfig: env.rabbitmq,
+      twistType,
+    }),
     logger: logger.child("twist"),
   });
 
@@ -79,21 +80,21 @@ async function startRealtimeCore() {
     odom: createOdomStream({
       grpcConfig: grpc,
       grpcTypes,
-      odometryType,
+      schema: odomSchema,
       logger: logger.child("odom-stream"),
       emitPosition: socket.emitPosition,
     }),
     taskFeedback: createTaskFeedbackStream({
       grpcConfig: grpc,
       grpcTypes,
-      feedbackType,
+      schema: taskFeedbackSchema,
       logger: logger.child("task-feedback-stream"),
       emitTaskFeedback: socket.emitTaskFeedback,
     }),
     battery: createBatteryStream({
       grpcConfig: grpc,
       grpcTypes,
-      batteryType,
+      schema: batterySchema,
       logger: logger.child("battery-stream"),
       emitBattery: socket.emitBattery,
     }),

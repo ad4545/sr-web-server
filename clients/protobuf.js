@@ -11,6 +11,18 @@ async function loadType(filePathSegments, typeName) {
   return root.lookupType(typeName);
 }
 
+async function loadProtobufSchema({ protoPath, typeName, toObjectOptions = PROTOBUF_TO_OBJECT_OPTIONS }) {
+  const root = await protobuf.load(resolveProjectPath(protoPath));
+  const type = root.lookupType(typeName);
+
+  return {
+    protoPath,
+    typeName,
+    type,
+    toObjectOptions,
+  };
+}
+
 async function loadOdometryType() {
   return loadType(["protobufs", "Odometry.proto"], "combined_odom.Odometry");
 }
@@ -41,6 +53,7 @@ module.exports = {
   loadBatteryType,
   loadFeedbackType,
   loadOdometryType,
+  loadProtobufSchema,
   loadStreamRouterTypes,
   loadTwistType,
 };

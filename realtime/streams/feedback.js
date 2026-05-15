@@ -1,19 +1,19 @@
-const { PROTOBUF_TO_OBJECT_OPTIONS } = require("../../clients/protobuf");
-const { createGrpcTopicStream } = require("../grpc/client");
+const { createGrpcSubscriptionClient } = require("../grpc/client");
 
-function createTaskFeedbackStream({ grpcConfig, grpcTypes, feedbackType, logger, emitTaskFeedback }) {
-  return createGrpcTopicStream({
+function createTaskFeedbackStream({ grpcConfig, grpcTypes, schema, logger, emitTaskFeedback }) {
+  return createGrpcSubscriptionClient({
     grpcConfig,
     logger: logger.child("grpc"),
     label: "task-feedback stream",
-    topics: grpcConfig.topics.taskFeedback,
+    subscriptions: grpcConfig.topics.taskFeedback.map((topic) => ({
+      topic,
+      schema,
+    })),
     topicStreamRequestType: grpcTypes.topicStreamRequestType,
     rawDataChunkType: grpcTypes.rawDataChunkType,
-    onChunk({ payload }) {
+    onMessage({ decoded }) {
       try {
-        const decoded = feedbackType.decode(payload);
-        const taskFeedback = feedbackType.toObject(decoded, PROTOBUF_TO_OBJECT_OPTIONS);
-        emitTaskFeedback(taskFeedback);
+        emitTaskFeedback(decoded);
       } catch (error) {
         logger.error("task-feedback stream processing failed", error.message);
       }

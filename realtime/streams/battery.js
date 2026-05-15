@@ -1,19 +1,19 @@
-const { PROTOBUF_TO_OBJECT_OPTIONS } = require("../../clients/protobuf");
-const { createGrpcTopicStream } = require("../grpc/client");
+const { createGrpcSubscriptionClient } = require("../grpc/client");
 
-function createBatteryStream({ grpcConfig, grpcTypes, batteryType, logger, emitBattery }) {
-  return createGrpcTopicStream({
+function createBatteryStream({ grpcConfig, grpcTypes, schema, logger, emitBattery }) {
+  return createGrpcSubscriptionClient({
     grpcConfig,
     logger: logger.child("grpc"),
     label: "battery stream",
-    topics: grpcConfig.topics.battery,
+    subscriptions: grpcConfig.topics.battery.map((topic) => ({
+      topic,
+      schema,
+    })),
     topicStreamRequestType: grpcTypes.topicStreamRequestType,
     rawDataChunkType: grpcTypes.rawDataChunkType,
-    onChunk({ payload }) {
+    onMessage({ decoded }) {
       try {
-        const decoded = batteryType.decode(payload);
-        const battery = batteryType.toObject(decoded, PROTOBUF_TO_OBJECT_OPTIONS);
-        emitBattery(battery);
+        emitBattery(decoded);
       } catch (error) {
         logger.error("battery stream processing failed", error.message);
       }

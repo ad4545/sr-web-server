@@ -5,6 +5,14 @@ const { createRedisConnection } = require("../clients/redis");
 const { createKafkaClient } = require("../clients/kafka");
 const { createS3Client } = require("../clients/s3");
 
+const { createTasksRepository } = require("./repositories/tasks.repository");
+const { createPathsRepository } = require("./repositories/paths.repository");
+const { createWaypointsRepository } = require("./repositories/waypoints.repository");
+const { createTasksService } = require("./services/tasks.service");
+const { createPathsService } = require("./services/paths.service");
+const { createWaypointsService } = require("./services/waypoints.service");
+const { createMapService } = require("./services/map.service");
+
 const { createTasksHandler } = require("./handlers/tasks");
 const { createPathsHandler } = require("./handlers/paths");
 const { createWaypointsHandler } = require("./handlers/waypoints");
@@ -34,22 +42,63 @@ async function startApiCore() {
     config: env.aws,
   });
 
+  const tasksRepository = createTasksRepository({
+    collection: mongo.collection(env.mongo.collections.tasks),
+  });
+  const pathsRepository = createPathsRepository({
+    collection: mongo.collection(env.mongo.collections.paths),
+  });
+  const waypointsRepository = createWaypointsRepository({
+    collection: mongo.collection(env.mongo.collections.waypoints),
+  });
+
+  const mapService = createMapService({
+    cache: redis.client
+      ? {
+          // DIP: the API core only sees a cache port here, not Redis specifics.
+          async get(cacheKey) {
+            return redis.client.get(cacheKey);
+          },
+
+          async set(cacheKey, value) {
+            return redis.client.set(cacheKey, value);
+          },
+        }
+      : null,
+    objectStore: {
+      // DIP: the map use-case depends on a narrow object-store port, not the S3 SDK.
+      async read({ bucketName: serviceBucketName, key: serviceKey }) {
+        const response = await s3.getObject({
+          Bucket: serviceBucketName,
+          Key: serviceKey,
+        }).promise();
+        return response.Body;
+      },
+    },
+    bucketName: env.aws.bucketName,
+    key: env.aws.mapName,
+    logger: logger.child("map"),
+  });
+
   const handlers = {
     tasks: createTasksHandler({
-      collection: mongo.collection(env.mongo.collections.tasks),
-      kafkaProducer,
+      service: createTasksService({
+        repository: tasksRepository,
+        kafkaProducer,
+      }),
     }),
     paths: createPathsHandler({
-      collection: mongo.collection(env.mongo.collections.paths),
+      service: createPathsService({
+        repository: pathsRepository,
+      }),
     }),
     waypoints: createWaypointsHandler({
-      collection: mongo.collection(env.mongo.collections.waypoints),
+      service: createWaypointsService({
+        repository: waypointsRepository,
+      }),
     }),
     map: createMapHandler({
-      redisClient: redis.client,
-      s3,
-      bucketName: env.aws.bucketName,
-      key: env.aws.mapName,
+      service: mapService,
       logger: logger.child("map"),
     }),
   };

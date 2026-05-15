@@ -1,8 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { createGrpcFrameParser, encodeGrpcMessage } = require("../grpc-client/framing");
-const { loadOdometryType, loadStreamRouterTypes } = require("../grpc-client/protobuf");
+const { createGrpcFrameParser, encodeGrpcMessage } = require("../realtime/grpc/framing");
+const { loadOdometryType, loadStreamRouterTypes } = require("../clients/protobuf");
 
 test("grpc framing helpers encode and reassemble messages", () => {
   const payload = Buffer.from("hello-grpc");

@@ -1,4 +1,5 @@
 const http2 = require("http2");
+const { PROTOBUF_TO_OBJECT_OPTIONS } = require("../../config/constants");
 const { createGrpcFrameParser, encodeGrpcMessage } = require("./framing");
 
 function delay(ms, signal) {
@@ -26,14 +27,31 @@ function createGrpcAuthority(config) {
   return `${config.useTls ? "https" : "http"}://${config.host}:${config.port}`;
 }
 
-function createGrpcTopicStream({
+function createRequestHeaders({ grpcConfig, requestPath }) {
+  return {
+    ":method": "POST",
+    ":path": requestPath,
+    ":scheme": grpcConfig.useTls ? "https" : "http",
+    ":authority": `${grpcConfig.host}:${grpcConfig.port}`,
+    "content-type": "application/grpc+proto",
+    te: "trailers",
+  };
+}
+
+function decodeProtobufPayload(schema, payload) {
+  const decodedMessage = schema.type.decode(payload);
+  return schema.type.toObject(decodedMessage, schema.toObjectOptions || PROTOBUF_TO_OBJECT_OPTIONS);
+}
+
+function createGrpcSubscriptionClient({
   grpcConfig,
   logger,
   label,
-  topics,
+  subscriptions,
   topicStreamRequestType,
   rawDataChunkType,
-  onChunk,
+  onMessage,
+  requestPath = "/com.example.grpc.StreamRouter/SubscribeToTopic",
 }) {
   const authority = createGrpcAuthority(grpcConfig);
   const activeSessions = new Set();
@@ -65,7 +83,7 @@ function createGrpcTopicStream({
     state.lastError = error.message;
   }
 
-  function handleChunk(messageBuffer, requestedTopic) {
+  function handleChunk(messageBuffer, requestedTopic, subscription) {
     const rawChunk = rawDataChunkType.decode(messageBuffer);
     const topic = rawChunk.topic || requestedTopic;
     const payload = rawChunk.payload ? Buffer.from(rawChunk.payload) : Buffer.alloc(0);
@@ -75,38 +93,125 @@ function createGrpcTopicStream({
       return;
     }
 
-    onChunk({
+    const decoded = decodeProtobufPayload(subscription.schema, payload);
+
+    onMessage({
       topic,
       key: rawChunk.key || null,
-      payload,
+      decoded,
       rawChunk,
+      schema: subscription.schema,
     });
   }
 
-  function subscribeToTopicOnce(topic) {
+  function openStream(session, subscription, requestedTopic, settle, reject) {
+    const requestPayload = topicStreamRequestType.encode(
+      topicStreamRequestType.create({ topic: requestedTopic })
+    ).finish();
+
+    const stream = session.request(createRequestHeaders({ grpcConfig, requestPath }));
+    const parser = createGrpcFrameParser((messageBuffer) => {
+      try {
+        handleChunk(messageBuffer, requestedTopic, subscription);
+      } catch (error) {
+        logger.error(`${label} failed to decode grpc payload`, {
+          topic: requestedTopic,
+          error: error.message,
+        });
+      }
+    });
+
+    let grpcStatus = null;
+    let grpcMessage = null;
+
+    stream.once("response", (headers) => {
+      const status = Number(headers[":status"]);
+      if (status !== 200) {
+        const error = new Error(`unexpected grpc http status ${status} for topic ${requestedTopic}`);
+        error.silent = status === 404;
+        reject(error);
+
+        try {
+          stream.close(http2.constants.NGHTTP2_CANCEL);
+        } catch (closeError) {
+          logger.debug(`${label} failed to close grpc stream`, closeError);
+        }
+        return;
+      }
+
+      markConnected(requestedTopic);
+      state.lastError = null;
+    });
+
+    stream.on("data", (chunk) => {
+      try {
+        parser.push(chunk);
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    stream.once("trailers", (trailers) => {
+      grpcStatus = trailers["grpc-status"];
+      grpcMessage = trailers["grpc-message"];
+    });
+
+    stream.once("error", reject);
+    stream.once("end", () => {
+      cleanupSession(session);
+      markDisconnected(requestedTopic);
+
+      if (abortController.signal.aborted) {
+        settle();
+        return;
+      }
+
+      if (grpcStatus && grpcStatus !== "0") {
+        const error = new Error(
+          `grpc stream ended with status ${grpcStatus} for topic ${requestedTopic}${
+            grpcMessage ? `: ${grpcMessage}` : ""
+          }`
+        );
+        error.grpcStatus = grpcStatus;
+        error.grpcTopic = requestedTopic;
+        error.silent = grpcStatus === "5";
+        error.recoverable = true;
+        setLastError(error);
+        reject(error);
+        return;
+      }
+
+      settle();
+    });
+
+    stream.end(encodeGrpcMessage(requestPayload));
+  }
+
+  function subscribeToTopicOnce(subscription) {
+    const { topic } = subscription;
+
     return new Promise((resolve, reject) => {
       let settled = false;
-      let grpcStatus = null;
-      let grpcMessage = null;
 
-      function settle(callback, value) {
+      function settle() {
         if (settled) {
           return;
         }
 
         settled = true;
-        callback(value);
+        resolve();
       }
 
-      const session = http2.connect(authority);
-      activeSessions.add(session);
+      function fail(error) {
+        if (settled) {
+          return;
+        }
 
-      const fail = (error) => {
         cleanupSession(session);
         markDisconnected(topic);
 
         if (abortController.signal.aborted) {
-          settle(resolve);
+          settle();
           return;
         }
 
@@ -117,8 +222,12 @@ function createGrpcTopicStream({
         }
 
         setLastError(error);
-        settle(reject, error);
-      };
+        settled = true;
+        reject(error);
+      }
+
+      const session = http2.connect(authority);
+      activeSessions.add(session);
 
       session.once("error", fail);
       session.once("close", () => {
@@ -126,115 +235,32 @@ function createGrpcTopicStream({
         markDisconnected(topic);
 
         if (abortController.signal.aborted) {
-          settle(resolve);
+          settle();
           return;
         }
 
         if (!settled) {
           const error = new Error(`grpc session closed before completion for topic ${topic}`);
           setLastError(error);
-          settle(reject, error);
+          settled = true;
+          reject(error);
         }
       });
 
       session.once("connect", () => {
-        const requestPayload = topicStreamRequestType
-          .encode(topicStreamRequestType.create({ topic }))
-          .finish();
-
-        const stream = session.request({
-          ":method": "POST",
-          ":path": "/com.example.grpc.StreamRouter/SubscribeToTopic",
-          ":scheme": grpcConfig.useTls ? "https" : "http",
-          ":authority": `${grpcConfig.host}:${grpcConfig.port}`,
-          "content-type": "application/grpc+proto",
-          te: "trailers",
-        });
-
-        const parser = createGrpcFrameParser((messageBuffer) => {
-          try {
-            handleChunk(messageBuffer, topic);
-          } catch (error) {
-            logger.error(`${label} failed to decode grpc payload`, {
-              topic,
-              error: error.message,
-            });
-          }
-        });
-
-        stream.once("response", (headers) => {
-          const status = Number(headers[":status"]);
-          if (status !== 200) {
-            const error = new Error(`unexpected grpc http status ${status} for topic ${topic}`);
-            error.silent = status === 404;
-            fail(error);
-
-            try {
-              stream.close(http2.constants.NGHTTP2_CANCEL);
-            } catch (closeError) {
-              logger.debug(`${label} failed to close grpc stream`, closeError);
-            }
-            return;
-          }
-
-          markConnected(topic);
-          state.lastError = null;
-        });
-
-        stream.on("data", (chunk) => {
-          try {
-            parser.push(chunk);
-          } catch (error) {
-            fail(error);
-          }
-        });
-
-        stream.once("trailers", (trailers) => {
-          grpcStatus = trailers["grpc-status"];
-          grpcMessage = trailers["grpc-message"];
-        });
-
-        stream.once("error", fail);
-        stream.once("end", () => {
-          cleanupSession(session);
-          markDisconnected(topic);
-
-          if (abortController.signal.aborted) {
-            settle(resolve);
-            return;
-          }
-
-          if (grpcStatus && grpcStatus !== "0") {
-            const error = new Error(
-              `grpc stream ended with status ${grpcStatus} for topic ${topic}${
-                grpcMessage ? `: ${grpcMessage}` : ""
-              }`
-            );
-            error.grpcStatus = grpcStatus;
-            error.grpcTopic = topic;
-            error.silent = grpcStatus === "5";
-            error.recoverable = true;
-            setLastError(error);
-            settle(reject, error);
-            return;
-          }
-
-          settle(resolve);
-        });
-
-        stream.end(encodeGrpcMessage(requestPayload));
+        openStream(session, subscription, topic, settle, fail);
       });
     });
   }
 
-  async function subscribeLoop(topic) {
+  async function subscribeLoop(subscription) {
     while (!abortController.signal.aborted) {
       try {
-        await subscribeToTopicOnce(topic);
+        await subscribeToTopicOnce(subscription);
       } catch (error) {
         if (!abortController.signal.aborted && !error.silent) {
           logger.error(`${label} subscription failed`, {
-            topic,
+            topic: subscription.topic,
             error: error.message,
           });
         }
@@ -252,18 +278,18 @@ function createGrpcTopicStream({
         return;
       }
 
-      if (!topics.length) {
+      if (!subscriptions.length) {
         throw new Error(`${label} requires at least one topic`);
       }
 
       state.started = true;
       logger.info(`${label} starting`, {
         authority,
-        topics,
+        topics: subscriptions.map((subscription) => subscription.topic),
       });
 
-      for (const topic of topics) {
-        const loopPromise = subscribeLoop(topic);
+      for (const subscription of subscriptions) {
+        const loopPromise = subscribeLoop(subscription);
         loopPromises.push(loopPromise);
       }
     },
@@ -292,6 +318,11 @@ function createGrpcTopicStream({
   };
 }
 
+function createGrpcTopicStream(options) {
+  return createGrpcSubscriptionClient(options);
+}
+
 module.exports = {
+  createGrpcSubscriptionClient,
   createGrpcTopicStream,
 };
