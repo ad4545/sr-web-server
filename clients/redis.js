@@ -1,6 +1,6 @@
 const Redis = require("ioredis");
 
-function createRedisConnection({ config, logger }) {
+const createRedisConnection = ({ config, logger }) => {
   if (!config.enabled) {
     return {
       client: null,
@@ -27,7 +27,7 @@ function createRedisConnection({ config, logger }) {
       logger.info("Redis connection closed");
     },
   };
-}
+};
 
 module.exports = {
   createRedisConnection,

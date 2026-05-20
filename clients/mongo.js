@@ -1,6 +1,6 @@
 const { MongoClient } = require("mongodb");
 
-async function createMongoConnection({ uri, dbName, logger }) {
+const createMongoConnection = async ({ uri, dbName, logger }) => {
   const client = new MongoClient(uri);
   await client.connect();
 
@@ -17,7 +17,7 @@ async function createMongoConnection({ uri, dbName, logger }) {
       logger.info("MongoDB connection closed");
     },
   };
-}
+};
 
 module.exports = {
   createMongoConnection,

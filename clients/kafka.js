@@ -1,6 +1,6 @@
 const { Kafka } = require("kafkajs");
 
-function createKafkaClient({ config }) {
+const createKafkaClient = ({ config }) => {
   const kafka = new Kafka({
     clientId: config.clientId,
     brokers: config.brokers,
@@ -14,7 +14,7 @@ function createKafkaClient({ config }) {
       return kafka.consumer({ groupId });
     },
   };
-}
+};
 
 module.exports = {
   createKafkaClient,

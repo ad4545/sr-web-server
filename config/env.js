@@ -1,36 +1,29 @@
-const path = require("path");
-const dotenv = require("dotenv");
-
-dotenv.config({
-  path: process.env.DOTENV_CONFIG_PATH || path.resolve(process.cwd(), ".env"),
-});
-
-function parseNumber(value, fallback) {
+const parseNumber = (value, fallback) => {
   if (value === undefined || value === null || value === "") {
     return fallback;
   }
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
+};
 
-function parseCsv(value, fallback) {
+const parseCsv = (value, fallback) => {
   const source = value || fallback || "";
   return source
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-}
+};
 
-function parseBoolean(value, fallback = false) {
+const parseBoolean = (value, fallback = false) => {
   if (value === undefined || value === null || value === "") {
     return fallback;
   }
 
   return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
-}
+};
 
-function buildRabbitMqUrl(config) {
+const buildRabbitMqUrl = (config) => {
   if (process.env.RABBITMQ_URL) {
     return process.env.RABBITMQ_URL;
   }
@@ -42,7 +35,7 @@ function buildRabbitMqUrl(config) {
     : "";
 
   return `amqp://${credentials}${config.host}:${config.port}/${encodedVhost}`;
-}
+};
 
 const defaultOdomTopics = [
   "amr.001.odom_with_amcl",
@@ -92,6 +85,13 @@ const env = {
     region: process.env.AWS_REGION || "ap-south-2",
     bucketName: process.env.S3_BUCKET,
     mapName: process.env.MAP_NAME,
+    taskCompletionBucket: process.env.TASK_COMPLETION_S3_BUCKET,
+  },
+  athena: {
+    database: process.env.ATHENA_DATABASE,
+    workgroup: process.env.ATHENA_WORKGROUP,
+    resultsBucket: process.env.ATHENA_RESULTS_BUCKET,
+    region: process.env.AWS_REGION || "ap-south-2",
   },
   kafka: {
     brokers: parseCsv(process.env.KAFKA_BROKERS || process.env.KAFKA_BROKER, "10.0.0.12:9092"),

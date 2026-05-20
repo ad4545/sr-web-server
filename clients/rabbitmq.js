@@ -1,13 +1,26 @@
 const amqp = require("amqplib");
 
-function createRabbitMqClient({ config, logger }) {
+const createRabbitMqClient = ({ config, logger }) => {
   let connection = null;
   let channel = null;
   let reconnectTimer = null;
   let connectingPromise = null;
   let lastError = null;
 
-  async function connect() {
+  const scheduleReconnect = () => {
+    if (reconnectTimer) {
+      return;
+    }
+
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect().catch((error) => {
+        logger.error("RabbitMQ reconnect failed", error.message);
+      });
+    }, config.reconnectDelayMs);
+  };
+
+  const connect = async () => {
     if (channel) {
       return channel;
     }
@@ -67,20 +80,7 @@ function createRabbitMqClient({ config, logger }) {
     } finally {
       connectingPromise = null;
     }
-  }
-
-  function scheduleReconnect() {
-    if (reconnectTimer) {
-      return;
-    }
-
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      connect().catch((error) => {
-        logger.error("RabbitMQ reconnect failed", error.message);
-      });
-    }, config.reconnectDelayMs);
-  }
+  };
 
   return {
     async connect() {
@@ -116,7 +116,7 @@ function createRabbitMqClient({ config, logger }) {
       lastError = null;
     },
   };
-}
+};
 
 module.exports = {
   createRabbitMqClient,

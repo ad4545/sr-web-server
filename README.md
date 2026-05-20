@@ -1,11 +1,11 @@
 # sr_web_server
 
-`sr_web_server` is split into two long-running roles:
+`sr_web_server` runs in two roles:
 
-- `api-core` for REST-style HTTP endpoints and database/object-store access
-- `realtime-core` for websocket delivery and gRPC subscriptions
+- `api-core` for the HTTP API
+- `realtime-core` for websocket delivery, gRPC subscriptions, and twist publishing
 
-The code is intentionally organized so the two roles can be reasoned about independently, while still sharing common helpers for logging, validation, configuration, and protobuf loading.
+Both roles start from [`index.js`](index.js). The entrypoint loads env once, reads `APP_ROLE`, and boots the matching runtime.
 
 ## Documentation
 
@@ -13,24 +13,26 @@ The code is intentionally organized so the two roles can be reasoned about indep
 - [Realtime Core](docs/realtime-core.md)
 - [Shared Structure](docs/shared-structure.md)
 
-## Quick Run
+## Run
 
-The runtime entrypoint is [`index.js`](index.js). It reads `APP_ROLE` and starts the matching service:
+- `npm run start:api-core`
+- `npm run start:realtime-core`
+- `npm run start:nginx`
 
-- `APP_ROLE=api-core` starts [`api/server.js`](api/server.js)
-- `APP_ROLE=realtime-core` starts [`realtime/server.js`](realtime/server.js)
+## Layout
 
-## High-Level Layout
+- `index.js` is the single composition root
+- `routes/` contains flat HTTP routers
+- `controllers/` contains flat HTTP controller functions
+- `models/` contains flat HTTP data-access functions
+- `realtime/` contains the flat non-HTTP realtime subsystem
+- `config/` holds environment and gRPC/config helpers
+- `clients/` holds external client wrappers and protobuf loaders
+- `lib/` holds shared logger and error helpers
+- `state/` holds runtime process state
 
-- `api/` contains HTTP routes, handlers, services, repositories, and validators
-- `realtime/` contains websocket handling, gRPC subscription code, stream adapters, and twist publishing
-- `clients/` contains infrastructure clients and schema loaders
-- `config/` contains environment parsing and shared constants
-- `lib/` contains shared logger, errors, and validation utilities
-- `middlewares/` contains Express middleware helpers
+## Rule Of Thumb
 
-## Maintenance Rule of Thumb
-
-- If you are changing an HTTP endpoint, start in `api/routes/` and follow the chain down to `api/services/`.
-- If you are changing websocket or gRPC behavior, start in `realtime/server.js` and follow the chain into `realtime/grpc/` and `realtime/streams/`.
-- If you are adding a new external dependency, prefer wrapping it in `clients/` so the rest of the app talks to a smaller interface.
+- Change an HTTP endpoint: start in `routes/`, then `controllers/`, then `models/`
+- Change realtime websocket or gRPC behavior: start in `realtime/`
+- Change startup or dependency wiring: start in `index.js`

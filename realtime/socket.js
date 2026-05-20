@@ -1,6 +1,6 @@
 const { Server } = require("socket.io");
 
-function createSocketServer({ httpServer, logger }) {
+const createSocketServer = ({ httpServer, logger }) => {
   const io = new Server(httpServer, {
     cors: {
       origin: "*",
@@ -45,7 +45,7 @@ function createSocketServer({ httpServer, logger }) {
       await io.close();
     },
   };
-}
+};
 
 module.exports = {
   createSocketServer,

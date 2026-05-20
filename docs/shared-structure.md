@@ -1,69 +1,49 @@
 # Shared Structure
 
-This repository is designed around two runtime roles that share a few common utilities.
+This repository keeps the HTTP API and realtime runtime separate, but both roles now use a flatter layout.
 
-## Shared Modules
+## Support Folders
 
-### `lib/`
+Shared infrastructure helpers are grouped by concern:
 
-Contains small reusable building blocks:
-
+- [`config/env.js`](../config/env.js): environment parsing
+- [`config/constants.js`](../config/constants.js): shared constants
+- [`config/grpc.js`](../config/grpc.js) and [`config/grpcUtils.js`](../config/grpcUtils.js): realtime gRPC topic config
+- [`clients/mongo.js`](../clients/mongo.js), [`clients/redis.js`](../clients/redis.js), [`clients/kafka.js`](../clients/kafka.js), [`clients/rabbitmq.js`](../clients/rabbitmq.js), [`clients/s3.js`](../clients/s3.js): external clients
+- [`clients/protobuf.js`](../clients/protobuf.js): protobuf schema/type loading
 - [`lib/logger.js`](../lib/logger.js): structured logger factory
-- [`lib/errors.js`](../lib/errors.js): application error types
-- [`lib/validation.js`](../lib/validation.js): input validation helpers
+- [`lib/errors.js`](../lib/errors.js): application error types and controller error responses
+- [`state/runtimeState.js`](../state/runtimeState.js): live runtime dependency/readiness state
 
-These modules are intentionally small so both cores can depend on them without duplicating behavior.
+## API Core
 
-### `clients/`
+HTTP flow is now:
 
-Contains infrastructure wrappers and schema loading:
+`index.js` -> `routes/*` -> `controllers/*` -> `models/*` -> external systems
 
-- MongoDB client
-- Redis client
-- Kafka client
-- RabbitMQ client
-- S3 client
-- protobuf schema loaders
+Use this when changing:
 
-The rule here is simple: code in `clients/` may know about third-party SDKs, but the rest of the application should depend on the smallest useful interface.
+- routes or verbs
+- HTTP request/response behavior
+- Mongo-backed API data access
+- map cache/object-store reads
 
-### `config/`
+## Realtime Core
 
-Contains environment parsing, constants, and gRPC topic/schema configuration.
+Realtime flow is now:
 
-- [`config/env.js`](../config/env.js) parses process environment into structured config
-- [`config/constants.js`](../config/constants.js) stores shared constants and protobuf conversion options
-- [`config/grpc.js`](../config/grpc.js) defines gRPC topics and protobuf schema references
-- [`config/grpc-utils.js`](../config/grpc-utils.js) contains small topic helper functions
+`index.js` -> `realtime/*` -> external systems
 
-## Core Boundaries
+Use this when changing:
 
-### API Core
-
-HTTP request in:
-
-`index.js` -> `api/server.js` -> `api/app.js` -> `api/routes/*` -> `api/handlers/*` -> `api/services/*` -> `api/repositories/*` -> external systems
-
-### Realtime Core
-
-Websocket or gRPC data in:
-
-`index.js` -> `realtime/server.js` -> `realtime/app.js` / `realtime/socket.js` / `realtime/grpc/*` -> `realtime/streams/*` -> external systems
-
-## Where to Change What
-
-- Add or change an API endpoint: `api/routes/` and `api/handlers/`
-- Change business rules for API data: `api/services/`
-- Change persistence for API data: `api/repositories/`
-- Change validation for API requests: `api/validators/`
-- Change websocket payloads: `realtime/socket.js` and `realtime/streams/`
-- Change gRPC subscription behavior: `realtime/grpc/client.js`
-- Change protobuf schema loading: `clients/protobuf.js`
-- Change topic naming or schema references: `config/grpc.js`
+- websocket event handling
+- gRPC framing/subscription logic
+- protobuf decoding behavior
+- task completion tracking
+- RabbitMQ twist publishing
 
 ## Maintenance Notes
 
-- Keep code in `clients/` free of application-specific logic.
-- Keep `realtime/streams/` focused on transforming decoded protobuf objects into websocket emissions.
-- Keep `api/services/` focused on use-case logic and not on Express response formatting.
-- Prefer thin handlers and thin route modules so the flow stays readable.
+- Keep HTTP code in `routes/`, `controllers/`, and `models/` only
+- Keep realtime logic inside the flat `realtime/` folder
+- Keep third-party client setup in the root support files

@@ -9,11 +9,11 @@
   "scripts": {
     "start:api-core": "APP_ROLE=api-core node index.js",
     "start:realtime-core": "APP_ROLE=realtime-core node index.js",
-    "start:grpc-client": "node realtime/server.js",
     "start:nginx": "bash scripts/start-nginx.sh",
     "test": "node --test"
   },
   "dependencies": {
+    "@aws-sdk/client-athena": "^3.1049.0",
     "amqplib": "^0.10.3",
     "aws-sdk": "^2.1693.0",
     "cors": "^2.8.6",
@@ -22,6 +22,7 @@
     "ioredis": "^5.10.1",
     "kafkajs": "^2.2.4",
     "mongodb": "^7.1.1",
+    "parquetjs-lite": "^0.8.7",
     "protobufjs": "^8.0.1",
     "socket.io": "^4.8.3"
   }
