@@ -7,6 +7,27 @@ const {
   buildTaskCompletionRow,
   writeTaskCompletionParquet,
 } = require("./parquet");
+const { createRedisConnection } = require("../../clients/redis");
+const { env } = require("../../config/env");
+const { state } = require("../../state/runtimeState");
+const { createLogger } = require("../../lib/logger");
+
+let localRedisConnection = null;
+
+const getRedisClient = () => {
+  if (state.api?.redis?.client) {
+    return state.api.redis.client;
+  }
+  if (localRedisConnection) {
+    return localRedisConnection.client;
+  }
+  const logger = createLogger("task-completion-redis");
+  localRedisConnection = createRedisConnection({
+    config: env.redis,
+    logger,
+  });
+  return localRedisConnection.client;
+};
 
 const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const SESSION_SWEEP_INTERVAL_MS = 60 * 1000; // check every 60 seconds
@@ -120,10 +141,53 @@ class TaskCompletionTracker {
   }
 
   completeTask({ robotID, status }) {
+    this.logger.info("Completing task function called", { robotID, status });
     const session = this.activeTaskByRobot.get(robotID);
     if (!session) {
       return;
     }
+
+    const taskName = session.originalTaskID.includes('_')
+      ? session.originalTaskID.substring(0, session.originalTaskID.lastIndexOf('_'))
+      : session.originalTaskID;
+    console.log(`Task completed ---- NAME : ${taskName}`);
+
+    // Asynchronously find the taskId for this taskName in Redis and mark the task completed
+    (async () => {
+      try {
+        const redisClient = getRedisClient();
+        if (!redisClient) {
+          this.logger.error("Redis client is not available in completeTask");
+          return;
+        }
+
+        console.log(`[completeTask] Searching for taskId in redis-tasks for taskName: "${taskName}"...`);
+        const allTasks = await redisClient.hgetall("redis-tasks");
+        let foundTaskId = null;
+        for (const [taskId, taskJson] of Object.entries(allTasks)) {
+          try {
+            const taskData = JSON.parse(taskJson);
+            if (taskData.masterTaskName === taskName) {
+              foundTaskId = taskId;
+              break;
+            }
+          } catch (parseError) {
+            this.logger.error(`[completeTask] Failed to parse task JSON for ID ${taskId}: ${parseError.message}`);
+          }
+        }
+
+        if (foundTaskId) {
+          console.log(`[completeTask] Found matching taskId "${foundTaskId}" for taskName "${taskName}". Calling markTaskCompleted...`);
+          const { markTaskCompleted } = require("../../models/tasks");
+          await markTaskCompleted(redisClient, foundTaskId);
+          console.log(`[completeTask] Successfully marked task "${foundTaskId}" as completed.`);
+        } else {
+          console.log(`[completeTask] No matching taskId found in redis-tasks for taskName "${taskName}".`);
+        }
+      } catch (err) {
+        this.logger.error(`[completeTask] Error executing task completion update in Redis: ${err.message}`);
+      }
+    })();
 
     const currentBattery = this.latestBatteryByRobot.get(robotID);
     session.stopSampling();
@@ -252,6 +316,11 @@ class TaskCompletionTracker {
       session.stopSampling();
     }
     this.activeTaskByRobot.clear();
+
+    if (localRedisConnection) {
+      await localRedisConnection.close().catch(() => {});
+      localRedisConnection = null;
+    }
 
     await Promise.allSettled([...this.pendingUploads]);
   }

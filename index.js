@@ -143,6 +143,17 @@ const startApiCore = async () => {
   const server = app.listen(getApiPort(), () => {
     setApiState({ ready: true });
     logger.info(`API core listening on ${getApiPort()}`);
+
+    // Call dispatch once on server startup -----
+    try {
+      const { dispatch } = require("./dispatcher");
+      dispatch().catch((err) => {
+        logger.error("Error running dispatch on startup of API core", err);
+      });
+    } catch (err) {
+      logger.error("Failed to load dispatcher on startup of API core", err);
+    }
+    // --------------------------------------
   });
 
   const shutdown = async (signal) => {
@@ -266,6 +277,16 @@ const startRealtimeCore = async () => {
 
   httpServer.listen(getRealtimePort(), () => {
     logger.info(`Realtime core listening on ${getRealtimePort()}`);
+
+    // Call dispatch once on server startup
+    try {
+      const { dispatch } = require("./dispatcher");
+      dispatch().catch((err) => {
+        logger.error("Error running dispatch on startup of Realtime core", err);
+      });
+    } catch (err) {
+      logger.error("Failed to load dispatcher on startup of Realtime core", err);
+    }
   });
 
   const shutdown = async (signal) => {

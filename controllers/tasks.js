@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const { NotFoundError, ValidationError, sendErrorResponse } = require("../lib/errors");
 const tasksModel = require("../models/tasks");
 const { state } = require("../state/runtimeState");
+const { dispatch } = require("../dispatcher");
 
 const saveTask = async (req, res) => {
   const { params } = req;
@@ -178,17 +179,95 @@ const forwardTask = async (req, res) => {
       throw new ValidationError("topic must be a string.");
     }
  
+    console.log(`[forwardTask] Received task to forward. masterTaskName: "${task.masterTaskName}", topic: "${task.topic || "N/A"}"`);
+ 
     if (!state.api.redis || !state.api.redis.client) {
       throw new Error("Redis client is not initialized.");
     }
+
+    if (task.masterTaskName === "Cancel") {
+      console.log("[forwardTask] Cancel task received. Deleting active and pending tasks...");
+
+      // 1. Delete all active and pending tasks from Redis
+      const activeTaskId = await state.api.redis.client.get("tasks:inprogress");
+      const pendingTaskIds = await state.api.redis.client.zrange("tasks:queue", 0, -1);
+      const allTaskIdsToDelete = [];
+      if (activeTaskId) allTaskIdsToDelete.push(activeTaskId);
+      if (pendingTaskIds && pendingTaskIds.length > 0) {
+        allTaskIdsToDelete.push(...pendingTaskIds);
+      }
+
+      const pipeline = state.api.redis.client.pipeline();
+      pipeline.del("tasks:inprogress");
+      pipeline.del("tasks:queue");
+      if (allTaskIdsToDelete.length > 0) {
+        pipeline.hdel("redis-tasks", ...allTaskIdsToDelete);
+      }
+      await pipeline.exec();
+
+      console.log("[forwardTask] Active and pending tasks deleted from Redis successfully.");
+
+      // 2. Send 'Cancel' task directly to the robot (via RabbitMQ)
+      const { getActiveRabbitMqClient, createRabbitMqClient } = require("../clients/rabbitmq");
+      const { env } = require("../config/env");
+
+      let client = getActiveRabbitMqClient();
+      if (!client) {
+        const { createLogger } = require("../lib/logger");
+        const logger = state.api?.logger || createLogger("controllers-tasks-rabbitmq");
+        client = createRabbitMqClient({
+          config: env.rabbitmq,
+          logger: logger.child("rabbitmq"),
+        });
+        await client.connect().catch((error) => {
+          logger.error("Failed to connect to RabbitMQ in forwardTask cancel fallback", error.message);
+        });
+      }
+
+      if (client) {
+        await client.publish({
+          exchange: env.rabbitmq.tasksExchange,
+          routingKey: env.rabbitmq.tasksRoutingKey,
+          content: Buffer.from(""),
+        });
+        console.log("[forwardTask] Cancel task sent directly to robot via RabbitMQ.");
+      } else {
+        console.warn("[forwardTask] No RabbitMQ client available to send Cancel task.");
+      }
+
+      // Also emit socket event to notify frontend of the cleared/cancelled tasks
+      try {
+        const { getSocketInstance } = require("../realtime/socket");
+        const socket = getSocketInstance();
+        if (socket) {
+          socket.emit("task-status-changed", {
+            masterTaskName: "Cancel",
+            status: "cancelled",
+          });
+        }
+      } catch (err) {
+        console.error("[forwardTask] Error emitting socket event for Cancel task:", err.message);
+      }
+
+      return res.status(200).json({
+        message: "Cancel task processed: deleted all active/pending tasks and forwarded cancel signal.",
+      });
+    }
  
     const createdTask = await tasksModel.createTask(state.api.redis.client, task);
+ 
+    console.log(`[forwardTask] Task created in Redis successfully. taskId: "${createdTask.taskId}"`);
+ 
+    dispatch().catch((error) => {
+      state.api.logger?.error("Error triggering dispatch after createTask:", error);
+    });
  
     return res.status(201).json({
       message: "Task forwarded and stored in Redis successfully.",
       data: createdTask,
     });
   } catch (error) {
+    console.error(`[forwardTask] Error occurred: ${error.message}`);
     return sendErrorResponse(res, error, state.api.logger);
   }
 };

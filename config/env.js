@@ -50,6 +50,9 @@ const defaultRabbitConfig = {
   exchangeType: process.env.RABBITMQ_EXCHANGE_TYPE || "direct",
   queue: process.env.RABBITMQ_QUEUE || "joystick",
   routingKey: process.env.RABBITMQ_ROUTING_KEY || "joystick",
+  tasksExchange: process.env.RABBITMQ_TASKS_EXCHANGE || "robot-tasks-exchange",
+  tasksQueue: process.env.RABBITMQ_TASKS_QUEUE || "robot-tasks-queue",
+  tasksRoutingKey: process.env.RABBITMQ_TASKS_ROUTING_KEY || "robot-tasks-key",
   reconnectDelayMs: parseNumber(process.env.RABBITMQ_RECONNECT_DELAY_MS, 5000),
   host: process.env.RABBITMQ_HOST || "10.0.0.11",
   port: parseNumber(process.env.RABBITMQ_PORT, 5672),
@@ -92,6 +95,9 @@ const env = {
     workgroup: process.env.ATHENA_WORKGROUP,
     resultsBucket: process.env.ATHENA_RESULTS_BUCKET,
     region: process.env.AWS_REGION || "ap-south-2",
+  },
+  analytics: {
+    shiftDurationHours: parseNumber(process.env.SHIFT_DURATION_HOURS, 8),
   },
   kafka: {
     brokers: parseCsv(process.env.KAFKA_BROKERS || process.env.KAFKA_BROKER, "10.0.0.12:9092"),

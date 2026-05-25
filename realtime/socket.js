@@ -1,5 +1,7 @@
 const { Server } = require("socket.io");
 
+let socketInstance = null;
+
 const createSocketServer = ({ httpServer, logger }) => {
   const io = new Server(httpServer, {
     cors: {
@@ -7,6 +9,8 @@ const createSocketServer = ({ httpServer, logger }) => {
       methods: ["GET", "POST"],
     },
   });
+
+  socketInstance = io;
 
   let twistHandler = null;
 
@@ -41,12 +45,21 @@ const createSocketServer = ({ httpServer, logger }) => {
     emitBattery(payload) {
       io.emit("battery", payload);
     },
+    emit(event, payload) {
+      io.emit(event, payload);
+    },
     async close() {
       await io.close();
     },
   };
 };
 
+const getSocketInstance = () => {
+  console.log(`[getSocketInstance] Retrieving Socket.io instance. Status: ${socketInstance ? "Active" : "Not Initialized"}`);
+  return socketInstance;
+};
+
 module.exports = {
   createSocketServer,
+  getSocketInstance,
 };

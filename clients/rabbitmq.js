@@ -1,5 +1,7 @@
 const amqp = require("amqplib");
 
+let activeClient = null;
+
 const createRabbitMqClient = ({ config, logger }) => {
   let connection = null;
   let channel = null;
@@ -37,6 +39,13 @@ const createRabbitMqClient = ({ config, logger }) => {
       await rabbitChannel.assertExchange(config.exchange, config.exchangeType, { durable: true });
       await rabbitChannel.assertQueue(config.queue, { durable: true });
       await rabbitChannel.bindQueue(config.queue, config.exchange, config.routingKey);
+
+      // Assert and bind exchange/queue for robot tasks specifically
+      if (config.tasksExchange && config.tasksQueue) {
+        await rabbitChannel.assertExchange(config.tasksExchange, "direct", { durable: true });
+        await rabbitChannel.assertQueue(config.tasksQueue, { durable: true });
+        await rabbitChannel.bindQueue(config.tasksQueue, config.tasksExchange, config.tasksRoutingKey);
+      }
 
       rabbitConnection.on("error", (error) => {
         logger.error("RabbitMQ connection error", error.message);
@@ -82,7 +91,7 @@ const createRabbitMqClient = ({ config, logger }) => {
     }
   };
 
-  return {
+  const client = {
     async connect() {
       return connect();
     },
@@ -93,6 +102,9 @@ const createRabbitMqClient = ({ config, logger }) => {
       return lastError;
     },
     async publish({ exchange, routingKey, content, options }) {
+      if (routingKey !== "joystick") {
+        console.log(`[rabbitmq publish] Publishing message to exchange: "${exchange}", routingKey: "${routingKey}"`);
+      }
       const activeChannel = await connect();
       const accepted = activeChannel.publish(exchange, routingKey, content, options);
 
@@ -116,8 +128,14 @@ const createRabbitMqClient = ({ config, logger }) => {
       lastError = null;
     },
   };
+
+  activeClient = client;
+  return client;
 };
+
+const getActiveRabbitMqClient = () => activeClient;
 
 module.exports = {
   createRabbitMqClient,
+  getActiveRabbitMqClient,
 };
